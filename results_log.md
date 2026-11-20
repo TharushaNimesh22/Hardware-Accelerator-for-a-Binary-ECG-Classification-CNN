@@ -161,9 +161,15 @@ Memory bit check: 524,288 + 524,288 + 8,192 (peak buffer) + 2,048 (CPU register 
 
 ---
 
-## Next: Step 2.3: CNN self-test on the RISC-V (32 test vectors)
+## 2026-11-21: Step 2.3: CNN software self-test on PicoRV32
 
 | Item | Value |
 |---|---|
-| Test vectors matched | _TBD_ |
-| Software cycles per beat | _TBD_ |
+| Test vectors | 2 (1 N, 1 ABN) from DS2, `make_test_vectors.py ... 2` |
+| Result | **2/2 PASS**: logits and class bit-exact with the Python integer model |
+| Cycles per beat (avg / min / max) | 16,277,439 / 16,277,359 / 16,277,519 |
+| Time per beat @ 50 MHz | 325.5 ms |
+| Cycles per MAC | ≈ 111 (146,624 MACs per beat) |
+| CPU config | PicoRV32 RV32IM, `ENABLE_MUL` (sequential multiplier), GCC 15.2.0 `-O2` |
+| Simulation wall time | 9 min 11 s (ModelSim 2020.1) |
+| Note | Vector 1 (true ABN) is predicted N by both the Python and RISC-V models (a model error, not an implementation error) |
