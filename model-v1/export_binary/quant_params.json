@@ -1,0 +1,131 @@
+{
+  "classes": [
+    "N",
+    "ABN"
+  ],
+  "fs_hz": 200,
+  "adc_per_mv": 200,
+  "window": 128,
+  "pre": 48,
+  "post": 80,
+  "rr_hist": [
+    8,
+    32
+  ],
+  "rr_features": [
+    "pre*256//avg8",
+    "post*256//avg8",
+    "pre*256//post",
+    "pre*256//avg32"
+  ],
+  "rr_note": "avg8/avg32 = integer mean of the PREVIOUS 8/32 RR intervals (current beat excluded)",
+  "abn_bias_offset": -2.75,
+  "x_sigma": 73.99458100703797,
+  "rr_mu": [
+    257.61531064568334,
+    257.62375401646455,
+    261.6675422754884,
+    257.15327063348735
+  ],
+  "rr_sd": [
+    130.66778160454228,
+    134.93683534731662,
+    87.66490890217129,
+    131.70301053396503
+  ],
+  "act_scales": {
+    "in": 0.07268037023946697,
+    "c1": 0.06717076871725361,
+    "c2": 0.06756464527646697,
+    "cat": 0.07282844439400003,
+    "fc1": 0.06253236402822047,
+    "out": 0.0007034614273056033
+  },
+  "input": {
+    "M": 24372,
+    "sh": 17
+  },
+  "rr": {
+    "mu": [
+      258,
+      258,
+      262,
+      257
+    ],
+    "M": [
+      27547,
+      26675,
+      20530,
+      27330
+    ],
+    "sh": [
+      18,
+      18,
+      17,
+      18
+    ]
+  },
+  "layers": {
+    "conv1": {
+      "shape": [
+        8,
+        1,
+        7
+      ],
+      "lo": 0,
+      "hi": 127,
+      "pad": 3,
+      "maxpool2": true,
+      "relu": true
+    },
+    "conv2": {
+      "shape": [
+        16,
+        8,
+        5
+      ],
+      "lo": 0,
+      "hi": 127,
+      "pad": 2,
+      "maxpool2": true,
+      "relu": true
+    },
+    "conv3": {
+      "shape": [
+        32,
+        16,
+        5
+      ],
+      "lo": 0,
+      "hi": 127,
+      "pad": 2,
+      "maxpool2": true,
+      "relu": true
+    },
+    "fc1": {
+      "shape": [
+        32,
+        516
+      ],
+      "lo": 0,
+      "hi": 127,
+      "pad": 0,
+      "maxpool2": false,
+      "relu": true
+    },
+    "fc2": {
+      "shape": [
+        2,
+        32
+      ],
+      "lo": -32768,
+      "hi": 32767,
+      "pad": 0,
+      "maxpool2": false,
+      "relu": false
+    }
+  },
+  "flatten_order": "channel-major: cat[c*16 + t] for conv3 pooled output, then 4 RR features",
+  "requant": "y = clamp((acc*M + (1<<(sh-1))) >> sh, lo, hi), arithmetic shift, acc*M needs 48 bits",
+  "mean_removal": "xc = w - (sum(w) >> 7)"
+}
