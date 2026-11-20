@@ -13,7 +13,7 @@ endif
 
 all: firmware_b0.hex
 
-firmware.elf: start.S main.c beatcnn_ref.c beatcnn_params.h link.ld
+firmware.elf: start.S main.c beatcnn_ref.c beatcnn_params.h test_vectors.h link.ld
 	$(CC) $(CFLAGS) -T link.ld -o $@ start.S main.c beatcnn_ref.c -lgcc
 
 firmware.bin: firmware.elf

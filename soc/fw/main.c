@@ -2,7 +2,18 @@
 //  1. runs the Pan-Tompkins accelerator on the ECG record in shared RAM
 //  2. runs the same algorithm in software (for verification + speed-up figure)
 //  3. interprets the beats (HR, RR, HRV, rhythm flags) and reports over UART
+//  Step 2.3: CNN self-test - runs the int8 CNN (beatcnn_ref.c) on the exported test
+//            vectors and checks every logit against the Python integer model
 #include <stdint.h>
+#include "test_vectors.h"
+
+// 1 = run only the CNN self-test, then print #END (fast simulation)
+// 0 = run the CNN self-test, then the normal Pan-Tompkins flow
+#define CNN_SELFTEST_ONLY 1
+
+// CNN in software (beatcnn_ref.c). Do NOT include beatcnn_params.h here: its weight
+// arrays are 'static', so including it twice would store the weights twice.
+int beatcnn_classify(const int16_t *window, const int32_t *rr, int32_t *logits);
 
 #define REG(a)      (*(volatile uint32_t *)(a))
 #define ECG         ((volatile int32_t *)0x10000000)   // word0 = N, then samples
@@ -25,7 +36,7 @@
 #define REFRACT   40
 #define DELAY     38
 
-// ------------------------------------------------------------------ UART helpers
+// UART helpers
 static void uputc(char c) { while (UART_STAT & 1) { } UART_DATA = (uint8_t)c; }
 static void uputs(const char *s) { while (*s) { if (*s == '\n') uputc('\r'); uputc(*s++); } }
 static void uputu(uint32_t v) {
@@ -33,10 +44,11 @@ static void uputu(uint32_t v) {
     do { b[i++] = '0' + v % 10; v /= 10; } while (v);
     while (i) uputc(b[--i]);
 }
+static void uputi(int32_t v) { if (v < 0) { uputc('-'); uputu((uint32_t)(-v)); } else uputu((uint32_t)v); }
 static int ugetc(void) { while (!(UART_STAT & 2)) { } return UART_DATA & 0xff; }
 static inline uint32_t rdcycle(void) { uint32_t c; __asm__ volatile ("rdcycle %0" : "=r"(c)); return c; }
 
-// ------------------------------------------------------------------ software Pan-Tompkins
+//  software Pan-Tompkins
 // Bit-exact with rtl/pan_tompkins_accel.v and tools/pt_golden.py
 static int32_t xb[16], ub[64], wb[8], qb[64];
 static int sw_peaks[MAXPK];
@@ -112,7 +124,7 @@ static int sw_pan_tompkins(const volatile int32_t *x, int len, int *peaks) {
     return np;
 }
 
-// ------------------------------------------------------------------ interpretation
+//  interpretation
 static int pk[MAXPK];
 
 static void interpret(int np) {
@@ -169,14 +181,60 @@ static void interpret(int np) {
     LEDR = mean_hr;                          // heart rate in binary on red LEDs
 }
 
+// CNN self-test (step 2.3)
+// Classifies each test beat with the C model on the PicoRV32 and compares the logits and the
+// class bit-exactly with the Python integer model. Also measures the cycles per beat.
+static int cnn_selftest(void) {
+    uputs("\n#CNN_SELFTEST\n");
+    uputs("vec,label,pred,exp_pred,");
+    for (int o = 0; o < TV_NCLS; o++) { uputs("logit"); uputu(o); uputc(','); }
+    for (int o = 0; o < TV_NCLS; o++) { uputs("exp"); uputu(o); uputc(','); }
+    uputs("cycles,result\n");
+
+    int pass = 0;
+    uint32_t cyc_sum = 0, cyc_min = 0xffffffffu, cyc_max = 0;
+    for (int n = 0; n < TV_N; n++) {
+        int32_t lg[TV_NCLS];
+        uint32_t t0 = rdcycle();
+        int p = beatcnn_classify(&TV_WIN[n * 128], &TV_RR[n * 4], lg);
+        uint32_t cyc = rdcycle() - t0;
+
+        int ok = (p == TV_PRED[n]);
+        for (int o = 0; o < TV_NCLS; o++) ok &= (lg[o] == TV_LOGITS[n * TV_NCLS + o]);
+        pass += ok;
+        cyc_sum += cyc;
+        if (cyc < cyc_min) cyc_min = cyc;
+        if (cyc > cyc_max) cyc_max = cyc;
+
+        uputu(n); uputc(','); uputu(TV_LABEL[n]); uputc(','); uputu(p); uputc(','); uputu(TV_PRED[n]); uputc(',');
+        for (int o = 0; o < TV_NCLS; o++) { uputi(lg[o]); uputc(','); }
+        for (int o = 0; o < TV_NCLS; o++) { uputi(TV_LOGITS[n * TV_NCLS + o]); uputc(','); }
+        uputu(cyc); uputc(','); uputs(ok ? "PASS" : "FAIL"); uputc('\n');
+    }
+    uputs("#CNN_SUMMARY\n");
+    uputs("vectors,");          uputu(TV_N);          uputc('\n');
+    uputs("passed,");           uputu(pass);          uputc('\n');
+    uputs("sw_cycles_avg,");    uputu(cyc_sum / TV_N); uputc('\n');
+    uputs("sw_cycles_min,");    uputu(cyc_min);       uputc('\n');
+    uputs("sw_cycles_max,");    uputu(cyc_max);       uputc('\n');
+    uputs("selftest,");         uputs(pass == TV_N ? "PASS" : "FAIL"); uputc('\n');
+    LEDG = (pass == TV_N) ? 0x1F0 : 0x100;       // LEDG4..7 on = CNN self-test passed
+    return pass == TV_N;
+}
+
 int main(void) {
+    cnn_selftest();
+#if CNN_SELFTEST_ONLY
+    uputs("#END\n");
+    for (;;) { }
+#endif
     for (;;) {
         LEDG = 0;
         uputs("\n#ECG-ACCEL DE2-115 PicoRV32\n");
         int len = ECG[0];
         uputs("samples,"); uputu(len); uputs("\nfs_hz,200\n");
 
-        // ---- hardware run
+        //  hardware run
         ACC_SRC = 1; ACC_LEN = len;
         uint32_t t0 = rdcycle();
         ACC_CTRL = 1;
@@ -186,7 +244,7 @@ int main(void) {
         for (int i = 0; i < hw_n; i++) pk[i] = ACC_PEAK(i);
         LEDG = 1;
 
-        // ---- software run (same algorithm on the CPU)
+        // software run (same algorithm on the CPU)
         uint32_t t2 = rdcycle();
         int sw_n = sw_pan_tompkins(ECG + 1, len, sw_peaks);
         uint32_t t3 = rdcycle();
