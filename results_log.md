@@ -18,7 +18,7 @@
 
 ---
 
-## 2026-11-17: CNN model (binary beat classifier)
+## 2026-11-20: CNN model (binary beat classifier, final training run)
 
 | Item | Value |
 |---|---|
@@ -34,26 +34,32 @@
 | MACs per beat | 146,624 |
 | Weight memory (int8) | ≈ 19.5 KB |
 | Quantisation | Post-training: int8 weights (per output channel), int8 activations, int32 bias, 16-bit multiplier + shift requantisation, BN folded |
-| Decision-bias calibration | ABN logit offset = −2.375 (tuned on validation, folded into fc2 bias) |
+| Decision-bias calibration | ABN logit offset = −2.750 (tuned on validation: val F1 0.879 vs 0.500 without offset; folded into fc2 bias) |
+| Model version | Final run of 2026-11-20. `export_binary/` must come from this same run. Re-run the step 1 check and rebuild the firmware if the export was regenerated |
 
 ### Float model on DS2 (unseen patients)
 
 | Metric | Value |
 |---|---|
-| Sensitivity (Se, ABN recall) | 0.501 |
-| Specificity (Sp, N recall) | 0.982 |
-| Positive predictivity (+P, ABN precision) | 0.772 |
-| F1 (ABN) | 0.607 |
-| Accuracy | 0.929 |
-| Confusion matrix [[TN, FP], [FN, TP]] | [[43412, 806], [2717, 2726]] |
-| Detected as ABN per AAMI subtype | V: 80.9 %, F: 17.3 %, S: 2.9 % |
+| Sensitivity (Se, ABN recall) | 0.481 |
+| Specificity (Sp, N recall) | 0.998 |
+| Positive predictivity (+P, ABN precision) | 0.966 |
+| F1 (ABN) | 0.642 |
+| Accuracy | 0.941 |
+| Confusion matrix [[TN, FP], [FN, TP]] | [[44127, 91], [2827, 2616]] |
+| Detected as ABN per AAMI subtype | V: 79.0 %, F: 14.2 %, S: 1.0 % |
 
 ### int8 integer model on DS2
 
 | Metric | Value |
 |---|---|
-| int8 vs float agreement | _TBD (notebook section 8.3)_ |
-| F1 (ABN), int8 | _TBD_ |
+| int8 vs float agreement | 99.95 % |
+| Sensitivity (Se, ABN recall) | 0.479 |
+| Specificity (Sp, N recall) | 0.998 |
+| Positive predictivity (+P, ABN precision) | 0.966 |
+| F1 (ABN) | 0.640 (float 0.642, difference −0.0017) |
+| Accuracy | 0.941 |
+| Confusion matrix [[TN, FP], [FN, TP]] | [[44127, 91], [2837, 2606]] |
 
 ---
 
