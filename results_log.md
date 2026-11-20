@@ -173,3 +173,20 @@ Memory bit check: 524,288 + 524,288 + 8,192 (peak buffer) + 2,048 (CPU register 
 | CPU config | PicoRV32 RV32IM, `ENABLE_MUL` (sequential multiplier), GCC 15.2.0 `-O2` |
 | Simulation wall time | 9 min 11 s (ModelSim 2020.1) |
 | Note | Vector 1 (true ABN) is predicted N by both the Python and RISC-V models (a model error, not an implementation error) |
+
+## 2026-11-21: Step 2.4: PicoRV32 with DSP multiplier (ENABLE_FAST_MUL)
+
+| Item | ENABLE_MUL (sequential) | ENABLE_FAST_MUL (DSP) |
+|---|---|---|
+| CNN self-test | 2/2 PASS | 2/2 PASS (identical logits) |
+| Cycles per beat (avg) | 16,277,439 | **10,891,005** (1.49× faster) |
+| Time per beat @ 50 MHz | 325.5 ms | 217.8 ms |
+| Cycles per MAC | ≈ 111 | ≈ 74 |
+| PicoRV32 logic cells / registers / DSP | 2,712 / 1,109 / 0 | 2,444 / 921 / 8 |
+| Total LEs / registers / DSP | 7,114 / 4,167 / 2 | 6,850 / 3,979 / 10 |
+| Fmax (Slow 1200 mV 85 °C) | 55.6 MHz (slack 2.014 ns) | 53.55 MHz (slack 1.325 ns) |
+| Simulation wall time (2 beats) | 9 min 11 s | 5 min 49 s |
+
+**Decision:** ENABLE_FAST_MUL is the official CPU configuration. **CNN software baseline = 10,891,005 cycles/beat.**
+Note: a ~10× faster multiply only gives 1.49× on the CNN, because most cycles are instruction overhead
+(loads, address arithmetic, loop control, ~3–4 CPI). This motivates a dedicated MAC datapath.
