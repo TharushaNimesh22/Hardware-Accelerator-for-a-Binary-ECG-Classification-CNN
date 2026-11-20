@@ -93,7 +93,7 @@ The results will be used to identify the effectiveness of different hardware arc
 - **Neural Network:** 1-D Convolutional Neural Network
 - **Communication:** UART
 - **Hardware Description Language:** SystemVerilog / Verilog
-- **Development Tools:** [Add FPGA synthesis, simulation, and development tools]
+- **Development Tools:** Quartus Prime & ModelSim
 
 ## Project Scope
 
