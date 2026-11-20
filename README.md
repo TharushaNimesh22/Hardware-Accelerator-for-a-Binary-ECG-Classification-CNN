@@ -5,7 +5,7 @@
 
 This project focuses on the design and implementation of a hardware-accelerated system for real-time binary classification of ECG signals using a lightweight 1-D Convolutional Neural Network (CNN).
 
-The system integrates a **PicoRV32 RISC-V processor**, a dedicated **Pan-Tompkins hardware accelerator** for real-time heartbeat (QRS complex) detection, and a custom-designed CNN hardware accelerator for ECG beat classification. UART communication is used for data transfer and system interaction.
+The system integrates a **PicoRV32 RISC-V processor**, a dedicated **Pan-Tompkins hardware accelerator** for real-time heartbeat (QRS complex) detection, and a **custom-designed CNN hardware accelerator** for ECG beat classification. UART communication is used for data transfer and system interaction.
 
 The primary objective is to develop an efficient hardware architecture for CNN inference, with particular emphasis on **minimizing memory accesses, optimizing computational efficiency, and improving overall inference performance**.
 
