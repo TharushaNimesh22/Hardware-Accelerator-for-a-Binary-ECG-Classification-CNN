@@ -52,8 +52,13 @@
 
 | Metric | Value |
 |---|---|
-| int8 vs float agreement | _TBD (notebook section 8.3)_ |
-| F1 (ABN), int8 | _TBD_ |
+| int8 vs float agreement | 99.95 % |
+| Sensitivity (Se, ABN recall) | 0.479 |
+| Specificity (Sp, N recall) | 0.998 |
+| Positive predictivity (+P, ABN precision) | 0.966 |
+| F1 (ABN) | 0.640 (float: 0.642, difference −0.0017) |
+| Accuracy | 0.941 |
+| Confusion matrix [[TN, FP], [FN, TP]] | [[44127, 91], [2837, 2606]] |
 
 ---
 
@@ -74,7 +79,7 @@
 |---|---|
 | CPU | PicoRV32, RV32IM (`ENABLE_MUL`, `ENABLE_DIV`, `BARREL_SHIFTER`, counters). Note: `ENABLE_MUL` = sequential multiplier, no DSP |
 | Clock | 50 MHz |
-| Program RAM | 32 KB (step 2.0–2.1) → 64 KB (from step 2.2) |
+| Program RAM | 32 KB → 64 KB |
 | ECG RAM | 64 KB (16K × 32-bit), true dual-port, shared by CPU and accelerator |
 | UART | 115200 baud, 8N1 |
 | Test record | 60 s synthetic ECG, 12,000 samples at 200 Hz, 72 bpm |
@@ -103,7 +108,7 @@ Command: `vsim -c -do sim/run_sim.do` (from the `ecg_soc` root)
 | `bss` (zeroed buffers) | n/a | 6,404 B |
 | Total RAM footprint | n/a | 33,304 B → exceeds 32 KB by 536 B |
 | Action | n/a | Program RAM enlarged to 64 KB (`soc.v`, `link.ld`, `start.S`, `makehex.py`) |
-| Regression simulation | n/a | Identical to step 2.1 (`hw_sw_match,YES`, 69 beats) |
+| Regression simulation | n/a | `hw_sw_match,YES`, 69 beats |
 
 ---
 
