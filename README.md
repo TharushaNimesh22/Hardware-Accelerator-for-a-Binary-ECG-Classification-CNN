@@ -1,98 +1,102 @@
-# ECG interpreter accelerator: PicoRV32 RISC-V + Pan-Tompkins on the DE2-115
 
-A recorded ECG sits in on-chip RAM. A RISC-V CPU (PicoRV32, RV32IM) starts a hardware
-Pan-Tompkins QRS detector that reads that same RAM directly, so no data gets copied. The CPU then
-works out the heart rate, RR intervals, HRV and rhythm, and sends a CSV report to the PC over RS-232.
-The firmware also runs the identical algorithm in software. That gives you a check that hardware and
-software agree, and a measured speed-up.
+# Hardware Accelerator for Binary ECG Classification Using CNNs
 
-```
-               +-------------------------------- DE2-115 / Cyclone IV EP4CE115 ---------------------------+
- RS-232  <---- | UART TX/RX  <--+                                                                         |
- (PC)          |                |        PicoRV32 bus (1 wait state)                                      |
-               |  PicoRV32  ----+------+-----------------+----------------------+                         |
-               |  RV32IM               |                 |                      |                         |
-               |               32 KB program RAM   64 KB ECG RAM (dual port)  Accelerator regs + PEAK[]   |
-               |                                         | port B               ^                         |
-               |                                         +--> LPF->HPF->d/dt->x^2->MWI->peak detect ------+
-               |                                              (1 sample / clock, 50 MHz)                  |
-               +------------------------------------------------------------------------------------------+
-```
+## Project Overview
 
-## Quick start
+This project focuses on the design and implementation of a hardware-accelerated system for real-time binary classification of ECG signals using a lightweight 1-D Convolutional Neural Network (CNN).
 
-1. **Make the ECG memory image** (on your PC, from the project root)
-   ```
-   pip install numpy scipy wfdb
-   python tools/ecg_to_hex.py --mitdb 100 --seconds 80      # MIT-BIH record 100 from PhysioNet
-   # or: --csv my_ecg.csv --fs 500 --col 1   |   --synthetic --hr 72  (pip install neurokit2)
-   ```
-   This writes `data/ecg.hex` (the RAM init file), `data/ecg.npy` and `data/expected_peaks.txt`
-   (the golden-model answer). Everything is resampled to 200 Hz. RAM holds up to 16383 samples, about 82 s.
-2. **Build the firmware**: `cd fw && make` (riscv64-unknown-elf-gcc), or `make ZIG=1` (`pip install ziglang`).
-   This produces `fw/firmware_b0..b3.hex`. A prebuilt copy is included.
-3. **Compile in Quartus**: open `ecg_soc.qpf` from the project root, then Compile, then Programmer.
-   Memory init files are read with relative paths. If you change the ECG data or the firmware, recompile
-   (or use *Processing → Update Memory Initialization File*, then re-run the Assembler).
-4. **Connect** a serial cable (or USB-RS232 adapter) to the board's DB9 port. Use 115200 baud, 8N1,
-   **no flow control**.
-   ```
-   pip install pyserial matplotlib
-   python tools/uart_receiver.py --port COM5
-   ```
-   Press **KEY0** to reset/rerun, or send `r`. LEDG0 lights when the hardware run is done, LEDG1 when HW == SW.
-   LEDR shows the mean heart rate in binary.
+The system integrates a **PicoRV32 RISC-V processor**, a dedicated **Pan-Tompkins hardware accelerator** for real-time heartbeat (QRS complex) detection, and a custom-designed CNN hardware accelerator for ECG beat classification. UART communication is used for data transfer and system interaction.
 
-## Example output (from full-system simulation)
-```
-#PERF
-hw_cycles,12039          <- accelerator, including CPU start/poll
-sw_cycles,6464696        <- same algorithm in C on PicoRV32
-speedup_x,536
-hw_sw_match,YES
-#BEATS
-beat,sample,time_ms,rr_ms,hr_bpm,flag
-...
-#SUMMARY
-beats,69
-mean_hr_bpm,72
-rmssd_ms,33
-rhythm,Normal sinus rhythm
-```
+The primary objective is to develop an efficient hardware architecture for CNN inference, with particular emphasis on **minimizing memory accesses, optimizing computational efficiency, and improving overall inference performance**.
 
-## Memory map
+The proposed design is evaluated against a baseline implementation to analyze the performance benefits achieved through hardware acceleration and architectural optimizations.
 
-| Address | What |
-|---|---|
-| `0x0000_0000` | 32 KB program/data RAM |
-| `0x1000_0000` | 64 KB ECG RAM. Word 0 = N samples, words 1..N = samples (int16, sign-extended). Shared CPU/accelerator |
-| `0x2000_0000` | UART: +0 TX (write) / RX (read). +4 status: bit0 tx_busy, bit1 rx_valid |
-| `0x2000_0010` / `0x14` | LEDR / LEDG |
-| `0x3000_0000` | Accelerator: CTRL(+0, bit0 start), STATUS(+4: busy, done, ovf), SRC(+8), LEN(+C), NPEAKS(+10), CYCLES(+14), SPKI(+18), NPKI(+1C) |
-| `0x3000_1000` | PEAK[i] = sample index of beat i (max 512) |
+## System Architecture
 
-## Accelerator pipeline (integer, bit-exact in Python / Verilog / C)
+The system consists of the following major components:
 
-| Stage | Equation (200 Hz) | Purpose |
+- **PicoRV32 RISC-V Processor:** Serves as the main processor, coordinating system operations and managing communication between hardware components.
+- **Pan-Tompkins Accelerator:** Performs real-time QRS complex detection to identify heartbeats from incoming ECG signals.
+- **CNN Hardware Accelerator:** Executes the forward inference operations of the CNN model for binary ECG classification.
+- **UART Interface:** Provides serial communication for ECG data transfer, system control, and result retrieval.
+
+## CNN Model Architecture
+
+A lightweight 1-D CNN is initially implemented for binary ECG classification. The model processes two input features:
+
+1. **ECG Beat Shape:** A window containing 128 ECG samples, with the R-peak positioned at index 48.
+2. **RR Interval Features:** Four timing-related features representing the temporal characteristics of the heartbeat.
+
+The CNN consists of three convolutional blocks followed by two fully connected layers. The convolutional layers extract morphological features from the ECG waveform, while the RR features are concatenated with the flattened convolutional output before classification.
+
+### Network Architecture
+
+| Layer | Configuration | Output Shape |
 |---|---|---|
-| Low-pass | `y = 2y[n-1] - y[n-2] + x - 2x[n-6] + x[n-12]` | ~11 Hz cut-off, removes EMG/mains noise |
-| High-pass | `(32·u[n-16] - Σ32 u) >> 5` | ~5 Hz cut-off, removes baseline wander |
-| Derivative | `(2w + w[n-1] - w[n-3] - 2w[n-4]) >> 3` | QRS slope |
-| Square | `(d·d) >> 3` | rectify, emphasise high slopes |
-| MWI | `Σ32 q >> 5` (160 ms window) | one smooth bump per QRS |
-| Peak detect | adaptive SPKI/NPKI, threshold `NPKI + ¼(SPKI-NPKI)`, 200 ms refractory, **searchback** at 1.66 × RR average with threshold/2 | R-peak decisions |
+| Input | ECG beat (128 samples) | 1 × 128 |
+| Conv1 + ReLU | 1 → 8, Kernel = 7 | 8 × 128 |
+| MaxPool | Pool size = 2 | 8 × 64 |
+| Conv2 + ReLU | 8 → 16, Kernel = 5 | 16 × 64 |
+| MaxPool | Pool size = 2 | 16 × 32 |
+| Conv3 + ReLU | 16 → 32, Kernel = 5 | 32 × 32 |
+| MaxPool | Pool size = 2 | 32 × 16 |
+| Flatten | - | 512 |
+| Concatenation | Flattened features + 4 RR features | 516 |
+| FC1 + ReLU | 516 → 32 | 32 |
+| FC2 | 32 → 2 | 2 |
 
-The first 2 s are a learning phase, so beats in that window are not reported. The reported index is
-corrected for the ~38-sample pipeline delay (measured error ±2 samples = ±10 ms).
+**Model specifications:**
 
-## Verification
-* `sh sim/run_sim.sh` (Icarus Verilog) runs two tests: an accelerator unit test against `data/expected_peaks.txt`, and a full-system run that prints the UART report.
-* Tested bit-exact on normal (72 bpm), tachycardia (150 bpm) and two highly irregular synthetic records.
-  On synthetic data the sensitivity is ≥98.6% for regular rhythms and PPV is ≈100%.
-* Validate on MIT-BIH: compare `results/beats_*.csv` against the `.atr` annotations with `wfdb.processing.compare_annotations` (±150 ms window).
+- Architecture: 1-D CNN
+- Classification: Binary (2 classes)
+- Total trainable parameters before BatchNorm folding: 19,978
+- Exported weights: 19,832 INT8 weights
+- Exported biases: 90 INT32 biases
+- Dropout: 0.3 (training only)
 
-## Limitations and next steps
-* The rhythm rules (brady/tachy/ectopic/irregular→possible AF) are simple heuristics, not diagnostic.
-* Ideas to extend the accelerator: QRS width/morphology, a T-wave check on the derivative slope, or a small
-  int8 1D-CNN beat classifier fed by the R-peak windows. You can also stream long records over UART into the ECG RAM (the CPU port is writable).
-* Resource estimate (not yet run through Quartus): roughly 100 of the 432 M9K blocks, a few thousand registers, and a handful of DSP multipliers (CPU MUL + squarer). The chip is far from full.
+Batch Normalization parameters are folded into the convolutional weights and biases during model export, simplifying the inference hardware implementation.
+
+## Hardware Acceleration Objectives
+
+The main focus of this project is the hardware implementation of the CNN inference engine rather than improving the classification accuracy of the neural network.
+
+Key objectives include:
+
+- **CNN Hardware Acceleration:** Develop a dedicated hardware architecture to accelerate the forward inference operations of the CNN.
+- **Memory Access Optimization:** Minimize memory accesses through efficient data reuse, optimized data movement, and architectural techniques that reduce unnecessary memory transactions.
+- **Computational Optimization:** Explore efficient hardware implementations of convolutional and fully connected operations.
+- **Processor–Accelerator Integration:** Integrate the CNN accelerator with the PicoRV32 RISC-V processor for efficient system-level operation.
+- **Real-Time ECG Processing:** Integrate heartbeat detection and CNN-based classification into a unified hardware processing system.
+- **Performance Evaluation:** Compare the proposed hardware-accelerated implementation against a baseline design using relevant performance metrics.
+
+## Performance Evaluation
+
+The proposed architecture is evaluated against a baseline implementation to investigate the benefits of dedicated hardware acceleration.
+
+The evaluation focuses on:
+
+- Execution latency and inference time
+- Number of clock cycles per inference
+- Memory access frequency and data movement
+- Hardware resource utilization
+- Computational throughput
+- Overall system performance
+
+The results will be used to identify the effectiveness of different hardware architectural optimizations and their impact on CNN inference performance.
+
+## Technologies and Tools
+
+*Add the tools and technologies used in the implementation.*
+
+- **Processor:** PicoRV32 (RISC-V)
+- **Heartbeat Detection:** Pan-Tompkins Algorithm
+- **Neural Network:** 1-D Convolutional Neural Network
+- **Communication:** UART
+- **Hardware Description Language:** SystemVerilog / Verilog
+- **Development Tools:** [Add FPGA synthesis, simulation, and development tools]
+
+## Project Scope
+
+This project explores the design of an efficient hardware acceleration architecture for lightweight neural network inference in biomedical signal processing applications.
+
+The central focus is on architectural optimization, efficient computation, reduced memory access, and processor–accelerator integration, with the ultimate goal of achieving efficient real-time ECG processing.
