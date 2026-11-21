@@ -190,3 +190,17 @@ Memory bit check: 524,288 + 524,288 + 8,192 (peak buffer) + 2,048 (CPU register 
 **Decision:** ENABLE_FAST_MUL is the official CPU configuration. **CNN software baseline = 10,891,005 cycles/beat.**
 Note: a ~10× faster multiply only gives 1.49× on the CNN, because most cycles are instruction overhead
 (loads, address arithmetic, loop control, ~3–4 CPI). This motivates a dedicated MAC datapath.
+
+## 2026-11-21: Step 2.5: Full pipeline in software (Pan-Tompkins HW → CNN SW), real MIT-BIH data
+
+| Item | Value |
+|---|---|
+| Record | MIT-BIH 233 (DS2 test patient), first 8 s, 1,600 samples @ 200 Hz, lead MLII |
+| Command | `ecg_to_hex.py --mitdb 233 --mitdb-dir ..\model\mitdb --seconds 8` |
+| Pan-Tompkins | HW 1,632 cycles vs SW 772,909 cycles (473×), hw_sw_match YES, 10 beats detected |
+| CNN beats classified | 3 (`CNN_MAX_BEATS = 3`; beats need a previous and a next beat) |
+| Bit-exact check (`verify_cnn_beats.py`) | **3/3 PASS** (RR features, logits, class == Python integer model) |
+| Classification vs annotations | N→N, **V→ABN**, N→N (3/3 correct) |
+| CNN cycles per beat (avg) | 10,888,152 (218 ms @ 50 MHz) |
+| Simulation wall time | 9 min 00 s |
+| Note | Rule-based rhythm summary reports "possible AF"; record 233 has frequent PVCs. The heuristic is misled by ectopic beats in an 8 s window, while the CNN's per-beat labels identify the cause (abnormal beats) |
