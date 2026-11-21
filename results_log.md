@@ -243,3 +243,45 @@ Note: a ~10× faster multiply only gives 1.49× on the CNN, because most cycles 
 
 Local parameter memory: dual-port M9K, 5,632 words (loaded once). Weight transfer happens once per power-up,
 not per beat.
+
+## 2026-11-21: Step 3.3/3.4: Convolution engine (Conv1d + ReLU + MaxPool2), 1 MAC/clock
+
+| Layer | Shape | MACs/beat | Cycles/beat | Cycles/MAC | Result (32 beats, ModelSim) |
+|---|---|---|---|---|---|
+| conv1 | 1×128 → 8×64, k=7 | 7,168 | 7,206 | 1.005 | PASS |
+| conv2 | 8×64 → 16×32, k=5 | 40,960 | 41,030 | 1.002 | PASS |
+| conv3 | 16×32 → 32×16, k=5 | 81,920 | 82,054 | 1.002 | PASS |
+| Total | n/a | 130,048 | 130,290 | 1.002 | n/a |
+
+Design: one generic engine for all conv layers; output-stationary (accumulator in a register, no
+partial sums stored); requant + ReLU + max-pool fused into the write path (pre-pool map never stored);
+weights from the local parameter memory (no shared-memory traffic during convolution).
+Overhead: 4 setup cycles per output channel + pipeline drain.
+Note: a testbench localparam-width bug (`CIN*LEN` evaluated in 8 bits by ModelSim) was found and fixed;
+the RTL was unaffected.
+
+## 2026-11-21: Step 3.5: Fully connected engine (fc1, fc2, argmax)
+
+| Layer | Shape | MACs/beat | Cycles/beat | Cycles/MAC | Result (32 beats, ModelSim) |
+|---|---|---|---|---|---|
+| fc1 | [p3 512 | qrr 4] = 516 → 32, ReLU int8 | 16,512 | 16,646 | 1.008 | PASS |
+| fc2 + argmax | 32 → 2 logits (int16) | 64 | 78 | 1.219 | PASS, 32/32 classes |
+
+Design: one FC engine for both layers (mode = ReLU-int8 / int16); RR features stored at positions
+512–515 of conv3's output buffer (no concatenation copy); weights read strictly sequentially;
+argmax = (logit1 > logit0).
+Sum of all verified blocks: ≈ 147,230 cycles per beat vs 10,891,005 in software (≈ 74× expected).
+
+## 2026-11-21: Step 3.6: Complete CNN accelerator, end to end (ModelSim)
+
+| Metric | No stalls | 30 % random grant stalls |
+|---|---|---|
+| Shared memory after batch vs golden model | identical | identical |
+| LOAD_WEIGHTS (once) | 5,154 reads, 5,158 cycles | 5,154 reads, 7,375 cycles |
+| Transfers per beat | 69.5 reads + 3 writes | 69.5 + 3 (1,088 stall cycles / 32 beats) |
+| Cycles per beat (end to end) | 147,235 | 147,269 |
+| Cycles per MAC | 1.004 | 1.004 |
+| Speed-up vs software (10,891,005) | 74.0× | 74.0× |
+
+Time per beat @ 50 MHz: 217.8 ms (SW) → 2.94 ms (HW). Shared-memory port used 72.5 / 147,235 cycles (0.05 %).
+RUN_BATCH before LOAD_WEIGHTS correctly rejected (error flag).
