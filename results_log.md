@@ -363,6 +363,80 @@ cost 4,312 LE + 1,900 registers + 36 M9K + 16 DSP elements; Fmax 61.5 MHz.
 - cnn_accel (step 3, unchanged) at 0x4000_0000; ARB_CONFLICTS register at 0x2000_0020.
 - LOAD_WEIGHTS started by the CPU, overlapped with the Pan-Tompkins run (arbiter test):
   load_reads = 5154 (weight block moved once), weights_valid = 1, load_check PASS
-  load_cnn_cycles = ____ (5158 when alone), load_stalls = ____, arb_conflicts = ____
-  Pan-Tompkins: stalls 0, hw_core_cycles = ____, hw_sw_match YES (priority to PT works)
+  load_cnn_cycles = 5968 (≈5158 when alone), load_stalls = 810, arb_conflicts = 810
+  (= 800 PT reads + 10 PT peak writes)
+- Pan-Tompkins: stalls 0, hw_core_cycles = 1609, hw_cycles = 1647, hw_sw_match YES
+  -> fixed priority to PT works; the CNN absorbs all conflicts
 - SW CNN beat 529 still bit-exact.
+
+## Step 5.4 – CNN driver: descriptors + RUN_BATCH, every beat on the accelerator
+- CPU writes 8-word descriptors (n_R + 4 RR); one RUN_BATCH per ≤64 beats; results read from descriptors.
+- Record 233, 8 s: 8 beats (6 N, 2 ABN), 1 batch, descriptors_not_done = 0
+- verify_cnn_beats.py: 8/8 bit-exact -> PASS;  SW check: 2/2 match -> hw_sw_cnn PASS
+- HW CNN: 147,235 cycles/beat (= step 3.6), total 1,177,883 cycles for 8 beats
+- Shared memory (CNN): 555 reads (69.4/beat = 5 descriptor + 64/65 window), 24 writes (3/beat), 0 stalls
+- SW CNN: 10,830,891 cycles/beat  -> CNN speed-up 73x
+- CPU descriptor set-up: 7,468 cycles (≈930/beat, 0.6 % of the HW CNN time)
+- Firmware (gcc): 10,324 bytes (21 % of the 48 KB program region)
+
+## Step 5.5 – Full-system simulation and system performance (MIT-BIH 233)
+- 8 s: 8/8 beats bit-exact; 60 s: 98/98 beats bit-exact (verify_cnn_beats.py PASS),
+  Pan-Tompkins hw_sw_match YES, SW CNN check 1/1 (CNN_SW_CHECK = 1).
+
+| Quantity | 8 s | 60 s |
+|---|---|---|
+| Beats detected / classified | 10 / 8 | 100 / 98 |
+| CNN batches (≤ 64) | 1 | 2 |
+| Pan-Tompkins (HW) cycles | 1,647 | 12,051 |
+| Descriptor set-up (CPU) cycles | 7,426 | 230,146 |
+| CNN (HW) cycles | 1,177,918 | 14,429,138 |
+| CNN cycles per beat | 147,235 | 147,235 |
+| **Total cycles (step 5)** | **1,186,991** | **14,671,335** |
+| **Total time @ 50 MHz** | **23.7 ms** | **293.4 ms** |
+| Faster than real time | 337 x | 204 x |
+| Step 2 (HW PT + SW CNN), est. | 86.7 M (1.73 s) | 1,061.7 M (21.2 s) |
+| All software, est. | 87.5 M (1.75 s) | 1,067.8 M (21.4 s) |
+| **Speed-up vs step 2** | **73.0 x** | **72.4 x** |
+| **Speed-up vs all software** | **73.7 x** | **72.8 x** |
+| Shared-memory reads PT / CNN | 800 / 555 | 6,000 / 6,817 |
+| Shared-memory writes PT / CNN | 10 / 24 | 100 / 294 |
+| CNN transfers per beat | 72.4 | 72.6 |
+| Weight load (once, at boot) | 5,154 reads | 5,154 reads |
+
+- Time split (60 s): CNN 98.35 %, CPU set-up 1.57 %, Pan-Tompkins 0.08 %.
+- Weights loaded once: CNN traffic 72.6 transfers/beat vs ≈5,227 if streamed per beat (−98.6 %).
+- Batching: cycles/beat identical in batch 1 and 2 (no per-batch overhead visible).
+- Set-up cost grows to ≈2,350 cycles/beat once the 32-beat RR history is full
+  (re-summing + divisions) -> candidate optimisation (running sums) for step 4.
+- Model behaviour (identical in HW and Python): 17/17 ABN predictions are true V beats;
+  11 V and 2 S beats predicted N (recall limitation of the model, not of the hardware).
+
+  ## Step 5.6 – Quartus compile of the complete SoC (EP4CE115F29C7, Quartus 22.1std Lite)
+- PicoRV32 + 128 KB shared memory (4 TDP lanes) + shm_arbiter + Pan-Tompkins + CNN + UART
+- 0 critical warnings; Fmax (Slow 1200mV 85C) = 52.5 MHz, setup slack +0.951 ns @ 50 MHz -> PASS
+
+| Resource | Used | Device |
+|---|---|---|
+| Logic elements | 11,881 | 114,480 (10 %) |
+| Registers | 6,282 | |
+| Memory bits | 1,249,354 | 3,981,312 (31 %) |
+| M9K | 166 | 432 (38 %) |
+| 9-bit multipliers | 26 | 532 (5 %) |
+| Pins | 36 | 529 (7 %) |
+
+| Block | LEs | Regs | Mem bits | M9K | DSP |
+|---|---|---|---|---|---|
+| Shared memory (sm0..sm3, True Dual Port) | 179 | 16 | 1,048,576 | 128 | 0 |
+| cnn_accel | 4,372 | 1,898 | 198,730 | 36 | 16 |
+| pan_tompkins_accel | 4,626 | 3,273 | 0 | 0 | 2 |
+| picorv32 | 2,402 | 922 | 2,048 | 2 | 8 |
+| shm_arbiter | 101 | 34 | 0 | 0 | 0 |
+| UART + glue | 285 | 135 | 0 | 0 | 0 |
+
+- CNN accelerator unchanged vs standalone (step 3.7: 4,312 LE, 36 M9K, 16 DSP, 61.5 MHz);
+  system Fmax set by the CPU side (step 2.4: 53.19 MHz -> 52.5 MHz with arbiter + 128-M9K port B).
+- Pan-Tompkins: ~2,400 registers are filter delay lines (76 x 32 bit) -> step-4 candidate
+  (shift-register RAM / narrower widths).
+- Image in the .sof: firmware SWCHECK=-1, MIT-BIH 233 first 60 s (12,000 samples).
+- RAM Summary: sm0..sm3 = True Dual Port, Single Clock, 32768 x 8, 32 M9K each, init from mem/shm_b*.hex (.hdl.mif);
+  CNN pmem = True Dual Port 5632 x 32 (32 M9K) -> shared memory and weight memory are real block RAM.
