@@ -285,3 +285,51 @@ Sum of all verified blocks: ≈ 147,230 cycles per beat vs 10,891,005 in softwar
 
 Time per beat @ 50 MHz: 217.8 ms (SW) → 2.94 ms (HW). Shared-memory port used 72.5 / 147,235 cycles (0.05 %).
 RUN_BATCH before LOAD_WEIGHTS correctly rejected (error flag).
+
+## 2026-11-21: Step 3.7: CNN accelerator FPGA cost (stand-alone, Quartus Prime Lite 22.1std, EP4CE115F29C7)
+
+| Resource | Used | % |
+|---|---|---|
+| Logic elements | 4,312 | 4 % |
+| Registers | 1,900 | n/a |
+| Memory bits | 198,730 | 5 % (weight memory 180,224 single TDP copy + 2 × 8,192 act. buffers + 2,080 window) |
+| M9K blocks | 36 / 432 | 8 % |
+| Embedded multiplier 9-bit elements | 16 / 532 | 3 % (4 used as 9×9 multipliers) |
+| Fmax (Slow 1200 mV 85 °C) | 61.53 MHz | slack +3.749 ns @ 50 MHz |
+
+Interface ports as virtual pins (157). 0 errors.
+
+### Resource utilisation by entity
+
+| Module | Logic cells | Registers | Memory bits | M9K | DSP elements (9×9) |
+|---|---|---|---|---|---|
+| cnn_accel (sequencer, registers, counters, buffer muxes) | 728 | 383 | 0 | 0 | 0 |
+| Activation buffer A (1,024 × 8) | 0 | 0 | 8,192 | 1 | 0 |
+| Activation buffer B (1,024 × 8) | 0 | 0 | 8,192 | 1 | 0 |
+| cnn_conv (conv1–3 engine) | 1,025 | 419 | 42 | 1 | 7 (3) |
+| cnn_fc (fc1–2 engine) | 948 | 360 | 0 | 0 | 5 (1) |
+| cnn_frontend (weight load, descriptor, window, quantisation, weight memory) | 1,611 | 738 | 182,304 | 33 | 4 (0) |
+| **Total** | **4,312** | **1,900** | **198,730** | **36** | **16 (4)** |
+
+### RAM summary (Fitter)
+
+| Memory | Mode | Depth × width | Notes |
+|---|---|---|---|
+| Weight memory `pmem` (cnn_frontend) | **True Dual Port** | 5,632 × 32 | single copy ✔; 32 of the 33 front-end M9K |
+| Window buffer `wbuf` (cnn_frontend) | Simple Dual Port | 65 × 32 | 1 M9K |
+| Activation buffer A | Simple Dual Port | 1,024 × 8 | 1 M9K |
+| Activation buffer B | Simple Dual Port | 1,024 × 8 | 1 M9K |
+| cnn_conv shift register (`altshift_taps`) | Simple Dual Port | 3 × 14 | pipeline tag delay mapped to RAM by Quartus; 1 M9K |
+
+### Notes / optimisation opportunities
+* The weight memory needs only 180,224 bits (≈ 20 M9K of capacity) but uses 32 M9K: its depth of 5,632
+  is not a power of two, so Quartus builds an 8,192-deep array. Splitting it into a 4,096-deep and a 1,536-deep part
+  would save about 10 M9K.
+* Quartus moved a 3-deep pipeline delay in cnn_conv into an M9K (`altshift_taps`). Turning off
+  "Auto Shift Register Replacement" keeps it in registers and frees 1 M9K.
+* Fmax 61.5 MHz > SoC Fmax 53.5 MHz: the accelerator will not limit the system clock.
+
+### Step 3 summary (P = 1 MAC)
+147,235 cycles/beat (1.004 cycles/MAC), 74.0× vs software (10,891,005 cycles/beat);
+69.5 reads + 3 writes per beat on the shared memory, weights 5,154 reads once;
+cost 4,312 LE + 1,900 registers + 36 M9K + 16 DSP elements; Fmax 61.5 MHz.
