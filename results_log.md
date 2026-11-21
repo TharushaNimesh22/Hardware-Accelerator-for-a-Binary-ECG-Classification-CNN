@@ -333,3 +333,36 @@ Interface ports as virtual pins (157). 0 errors.
 147,235 cycles/beat (1.004 cycles/MAC), 74.0× vs software (10,891,005 cycles/beat);
 69.5 reads + 3 writes per beat on the shared memory, weights 5,154 reads once;
 cost 4,312 LE + 1,900 registers + 36 M9K + 16 DSP elements; Fmax 61.5 MHz.
+
+## Step 5.1 – Merge the memories (single 128 KB shared memory)
+- Change: program RAM + ECG ROM -> one 128 KB true dual-port shared memory
+  (port A = CPU, port B = Pan-Tompkins). Image built by tools/make_mem_image.py
+  (program 0x0000, weight block 0xC000, record header 0x12800, ECG ring 0x18000).
+- Software CNN now reads weights from the shared weight block (fw/beatcnn_shm.c).
+- Record 233, first 8 s (N = 1600): Pan-Tompkins hw_cycles = ____, hw_sw_match = YES
+- CNN beats (software): 529 N, 614 ABN, 762 N — 3/3 bit-exact vs Python -> PASS
+- Software CNN: cnn_cycles_avg = ____ cycles/beat (step 2.5: ~10.89 M)
+  -> slightly slower because the weights are read through a pointer, not as compile-time constants
+
+## Step 5.2 – Pan-Tompkins as a shared-memory master + port-B arbiter
+- Pan-Tompkins reads the packed ECG ring itself (2 samples/word) and writes R-peaks to the
+  shared-memory peak list (word 0x4800). Internal 512-entry peak RAM and 0x3000_1000 window removed.
+- New rtl/shm_arbiter.v: M0 = Pan-Tompkins (priority), M1 = CNN (step 5.3).
+- Stand-alone tb_pt (record 233, 8 s, N = 1600, 10 peaks):
+  | run | stall | cycles | reads | writes | stalls | result |
+  |---|---|---|---|---|---|---|
+  | SRC=0 | 0 %  | 1609 | 800 | 10 | 0    | PASS |
+  | SRC=0 | 30 % | 1617 | 800 | 10 | 321  | PASS |
+  | SRC=1 | 30 % | 1623 | 800 | 10 | 351  | PASS |
+  | SRC=0 | 75 % | 3303 | 800 | 10 | 2480 | PASS |
+- Shared-memory reads per record: 1600 -> 800 (-50 %); writes = 1 per beat.
+- 4-word FIFO hides 30 % grant loss (+0.5 % cycles); pipeline is gap tolerant (exact at 75 %).
+- Full SoC: hw_cycles = ____, hw_sw_match = YES, CNN beat 529 bit-exact -> PASS
+
+## Step 5.3 – CNN accelerator in the SoC (arbiter master 1)
+- cnn_accel (step 3, unchanged) at 0x4000_0000; ARB_CONFLICTS register at 0x2000_0020.
+- LOAD_WEIGHTS started by the CPU, overlapped with the Pan-Tompkins run (arbiter test):
+  load_reads = 5154 (weight block moved once), weights_valid = 1, load_check PASS
+  load_cnn_cycles = ____ (5158 when alone), load_stalls = ____, arb_conflicts = ____
+  Pan-Tompkins: stalls 0, hw_core_cycles = ____, hw_sw_match YES (priority to PT works)
+- SW CNN beat 529 still bit-exact.
