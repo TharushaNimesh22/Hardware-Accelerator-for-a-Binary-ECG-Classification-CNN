@@ -204,3 +204,16 @@ Note: a ~10× faster multiply only gives 1.49× on the CNN, because most cycles 
 | CNN cycles per beat (avg) | 10,888,152 (218 ms @ 50 MHz) |
 | Simulation wall time | 9 min 00 s |
 | Note | Rule-based rhythm summary reports "possible AF"; record 233 has frequent PVCs. The heuristic is misled by ectopic beats in an 8 s window, while the CNN's per-beat labels identify the cause (abnormal beats) |
+
+## 2026-11-21: Step 3.0: Shared-memory interface (CNN accelerator)
+
+| Item | Value |
+|---|---|
+| Spec | `cnn/docs/interface_spec.md` (single 128 KB shared memory, port A CPU / port B accelerators) |
+| Weight block (option C, loaded once) | 5,154 words = 20,616 bytes at 0x0_C000 |
+| Descriptors | 8 words per beat at 0x1_1800 (n_R, 4 RR, logits, cycles, status) |
+| ECG ring buffer | 32 KB at 0x1_8000, 16,384 samples (2 × int16 per word), mask 0x1FFF |
+| Golden shared-memory model | 32/32 beats bit-exact with the notebook |
+| Layout check (ModelSim, 30% random port stalls) | PASS (4,096 window samples via ring addressing, incl. wrap) |
+| Expected transfers | LOAD_WEIGHTS 5,154 reads (once); per beat 69.5 reads + 3 writes |
+| Reference: weights streamed per beat (option B) | +5,154 reads per beat (≈ 74× more per-beat traffic) |
