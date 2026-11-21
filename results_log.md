@@ -217,3 +217,29 @@ Note: a ~10× faster multiply only gives 1.49× on the CNN, because most cycles 
 | Layout check (ModelSim, 30% random port stalls) | PASS (4,096 window samples via ring addressing, incl. wrap) |
 | Expected transfers | LOAD_WEIGHTS 5,154 reads (once); per beat 69.5 reads + 3 writes |
 | Reference: weights streamed per beat (option B) | +5,154 reads per beat (≈ 74× more per-beat traffic) |
+
+## 2026-11-21: Step 3.1: MAC and requantisation units
+
+| Item | Value |
+|---|---|
+| MAC unit | int8 × int8 → int32 accumulate, 1 MAC/clock, bias load via `clear` (`cnn/rtl/mac_unit.v`) |
+| Requant unit | (acc·M + 2^(sh−1)) >> sh, clamp; modes ReLU-int8 / int8 / int16; 2-stage pipeline, 1 value/clock (`cnn/rtl/requant.v`) |
+| Test A (MAC, 2,000 random sequences of 1–600 products) | 0 errors |
+| Test B (requant, 50,000 random cases, all modes, sh 1–47) | 0 errors |
+| Test C (real model: 4,864 cases: input/RR quant, conv1, fc1, fc2) | 0 errors |
+| Largest accumulator in the model | 53,825 (< 2^16); shifts 17–26 |
+| Test sensitivity check | Planted bugs (no rounding; broken sign bit) detected by A/B/C |
+
+## 2026-11-21: Step 3.2: CNN accelerator front end
+
+| Item | No stalls | 30 % random grant stalls |
+|---|---|---|
+| Bad weight-block address | magic error detected | magic error detected |
+| LOAD_WEIGHTS (once) | 5,154 reads, 5,159 cycles | 5,154 reads, 7,374 cycles |
+| q0 (128) + qrr (4), 32 beats | bit-exact | bit-exact |
+| Window reads | 16 beats × 64 words, 16 × 65 (even/odd start, ring wrap) | same |
+| Shared-memory reads per beat | 69.5 (= golden model) | 69.5 |
+| Front-end cycles per beat | 212 | 242 |
+
+Local parameter memory: dual-port M9K, 5,632 words (loaded once). Weight transfer happens once per power-up,
+not per beat.
